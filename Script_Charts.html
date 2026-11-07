@@ -1,0 +1,434 @@
+<script>
+/* JS: Logic vẽ và cập nhật Chart.js */
+
+/* ======================= DONUT + COMBO OVERVIEW ======================= */
+
+/**
+ * Hàm đếm số lượng task_name duy nhất phân loại theo một cột (groupKey)
+ * @param {Array} data - Mảng dữ liệu FILTERED
+ * @param {String} groupKey - Tên thuộc tính muốn phân loại ('type', 'product', 'pic',...)
+ * @returns {Object} Kết quả dạng { "AR": 12, "PN": 25 }
+*/
+  function getDistinctTaskCountByGroup(data, groupKey) {
+    const groupMap = {};
+
+    data.forEach(r => {
+      const key = r[groupKey] || 'Chưa phân loại';
+      const task = r.taskName || r.taskId;
+
+      if (!groupMap[key]) {
+        groupMap[key] = new Set(); // Dùng Set để tự loại bỏ task trùng lặp
+      }
+      if (task) {
+        groupMap[key].add(task);
+      }
+    });
+
+    // Chuyển các Set thành số lượng (size)
+    const result = {};
+    Object.keys(groupMap).forEach(key => {
+      result[key] = groupMap[key].size;
+    });
+
+    return result;
+  }
+
+const DONUT_COLORS = ['#5b5fef','#ff8a3d','#1fb17a','#2e6bf0','#a855f7','#06b6d4','#f59e0b','#e0435a'];
+const DONUT_METRIC_LABELS = { tasks: 'Số lượng task', impr: 'Impression', click: 'Click' };
+
+function getDonutValues(groupKey, metric){
+  const groups = {};
+  const taskSets = {};
+
+  FILTERED.forEach(r => {
+    const group = r[groupKey] || (groupKey === 'product' ? 'Unassigned' : groupKey === 'pic' ? 'Not input data' : 'Chưa phân loại');
+    if (!groups[group]) groups[group] = 0;
+    if (!taskSets[group]) taskSets[group] = new Set();
+
+    if (metric === 'tasks') {
+      const task = r.taskName || r.taskId;
+      if (task) taskSets[group].add(task);
+    } else {
+      groups[group] += metric === 'impr' ? r.impression : r.click;
+    }
+  });
+
+  if (metric === 'tasks') {
+    Object.keys(taskSets).forEach(group => { groups[group] = taskSets[group].size; });
+  }
+
+  const labels = Object.keys(groups).sort((a, b) => groups[b] - groups[a]);
+  return { labels, data: labels.map(label => groups[label]) };
+}
+
+function renderTopicBarChart(){
+  const el = document.getElementById('topicBarChart');
+  if(!el) return;
+
+  const metric = topicMetric;
+  const { labels: allLabels, data: allData } = getDonutValues('topic', metric);
+  const labels = allLabels.slice(0, 5);
+  const data = allData.slice(0, 5);
+  const hasMoreTopics = allLabels.length > 5;
+  if (hasMoreTopics) {
+    labels.push('...');
+    data.push(0);
+  }
+
+  if(topicBarInst) topicBarInst.destroy();
+  topicBarInst = new Chart(el, {
+    type: 'bar',
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => c.label === '...' ? 'Còn nhiều topic khác' : DONUT_METRIC_LABELS[metric] + ': ' + fmt(c.parsed.x) } }
+      },
+      scales: {
+        x: { beginAtZero: true, grid: { color: '#eef0f8' }, ticks: { callback: v => fmt(v), font: { size: 10 } } },
+        y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+      }
+    },
+    data: {
+      labels,
+      datasets: [{
+        label: DONUT_METRIC_LABELS[metric],
+        data,
+        backgroundColor: '#5b5fef',
+        borderRadius: 5,
+        maxBarThickness: 28
+      }]
+    },
+  });
+}
+
+function renderDonutLegend(containerId, labels, data, colors, total){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  el.innerHTML = labels.map((l,i)=>{
+    const v = data[i];
+    const pct = total ? (v/total*100).toFixed(1) : '0.0';
+    return `<div class="item"><span class="dot" style="background:${colors[i]}"></span><b>${l}</b><span class="pct">${fmt(v)} (${pct}%)</span></div>`;
+  }).join('');
+}
+
+function centerTextPlugin(getTotal){
+  return {
+    id: 'centerText_' + Math.random().toString(36).slice(2),
+    afterDraw(chart){
+      const {ctx, chartArea:{width,height,top,left}} = chart;
+      ctx.save();
+      const cx = left + width/2, cy = top + height/2;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = '600 10.5px Segoe UI'; ctx.fillStyle = '#6b7290';
+      ctx.fillText('Tổng số', cx, cy - 11);
+      ctx.font = '800 16px Segoe UI'; ctx.fillStyle = '#1c2144';
+      ctx.fillText(fmt(getTotal()), cx, cy + 10);
+      ctx.restore();
+    }
+  };
+}
+
+function renderProductDonut(){
+  const el = document.getElementById('productDonutChart');
+  if(!el) return;
+  const metric = donutMetrics.product;
+  const { labels, data } = getDonutValues('product', metric);
+  const total = data.reduce((a,b)=>a+b,0);
+  const colors = labels.map((_,i)=> DONUT_COLORS[i % DONUT_COLORS.length]);
+
+  renderDonutLegend('legendProductDonut', labels, data, colors, total);
+
+  if(productDonutInst) productDonutInst.destroy();
+  productDonutInst = new Chart(el, {
+    type:'doughnut',
+    data:{ labels, datasets:[{ data, backgroundColor:colors, borderWidth:0, hoverOffset:4 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false, cutout:'68%',
+      plugins:{ 
+        legend:{display:false}, 
+        tooltip:{callbacks:{label:c=> c.label+': '+fmt(c.parsed)+' '+DONUT_METRIC_LABELS[metric].toLowerCase()+' ('+(total?(c.parsed/total*100).toFixed(1):0)+'%)'}} 
+      }
+    },
+    plugins:[ centerTextPlugin(()=>total) ]
+  });
+}
+
+function renderPicDonut(){
+  const el = document.getElementById('picDonutChart');
+  if(!el) return;
+  const metric = donutMetrics.pic;
+  const { labels, data } = getDonutValues('pic', metric);
+  const total = data.reduce((a,b)=>a+b,0);
+  const colors = labels.map((_,i)=> DONUT_COLORS[i % DONUT_COLORS.length]);
+
+  renderDonutLegend('legendPicDonut', labels, data, colors, total);
+
+  if(picDonutInst) picDonutInst.destroy();
+  picDonutInst = new Chart(el, {
+    type:'doughnut',
+    data:{ labels, datasets:[{ data, backgroundColor:colors, borderWidth:0, hoverOffset:4 }] },
+    options:{
+      responsive:true, maintainAspectRatio:false, cutout:'68%',
+      plugins:{ 
+        legend:{display:false}, 
+        tooltip:{callbacks:{label:c=> c.label+': '+fmt(c.parsed)+' '+DONUT_METRIC_LABELS[metric].toLowerCase()+' ('+(total?(c.parsed/total*100).toFixed(1):0)+'%)'}} 
+      }
+    },
+    plugins:[ centerTextPlugin(()=>total) ]
+  });
+}
+
+function renderComboChart(){
+  // 1. Lấy giá trị granularity từ biến currentGranularity (Xóa dòng khai báo const gran bị trùng ở dưới)
+  const gran = (typeof currentGranularity !== 'undefined') ? currentGranularity : 'daily';
+  
+  const el = document.getElementById('comboOverviewChart');
+  if(!el) return;
+
+  let labels, sentData, imprData, clickData;
+
+  if(gran === 'daily'){
+    labels = [...new Set(FILTERED.map(r=>r.date))].sort();
+    sentData  = labels.map(d=> FILTERED.filter(r=>r.date===d).reduce((a,r)=>a+r.sent,0));
+    imprData  = labels.map(d=> FILTERED.filter(r=>r.date===d).reduce((a,r)=>a+r.impression,0));
+    clickData = labels.map(d=> FILTERED.filter(r=>r.date===d).reduce((a,r)=>a+r.click,0));
+  } else {
+    const allDates = [...new Set(FILTERED.map(r=>r.date))].sort();
+    const weekMap = {};
+    allDates.forEach(d=>{
+      const dt = new Date(d); const ws = new Date(dt); ws.setDate(dt.getDate()-dt.getDay());
+      const key = dateStr(ws); weekMap[key] = weekMap[key] || {sent:0, impr:0, click:0};
+    });
+    FILTERED.forEach(r=>{
+      const dt = new Date(r.date); const ws = new Date(dt); ws.setDate(dt.getDate()-dt.getDay());
+      const key = dateStr(ws); weekMap[key] = weekMap[key] || {sent:0, impr:0, click:0};
+      weekMap[key].sent += r.sent; weekMap[key].impr += r.impression; weekMap[key].click += r.click;
+    });
+    const weekKeys = Object.keys(weekMap).sort();
+    sentData  = weekKeys.map(k=>weekMap[k].sent);
+    imprData  = weekKeys.map(k=>weekMap[k].impr);
+    clickData = weekKeys.map(k=>weekMap[k].click);
+    labels = weekKeys.map(k=> 'Tuần ' + k.slice(5));
+  }
+
+  // 2. Tính toán 2 chỉ số tỉ lệ (%)
+  const ctrData = imprData.map((v,i)=> v ? Number((clickData[i]/v*100).toFixed(1)) : 0); // % Click / Impression
+  const cpsData = sentData.map((v,i)=> v ? Number((clickData[i]/v*100).toFixed(1)) : 0); // % Click / Sent
+
+  const dispLabels = gran === 'daily' ? labels.map(d=> d.slice(8,10)+'/'+d.slice(5,7)) : labels;
+
+  // 3. Định nghĩa danh sách 5 Datasets khả thi
+  const allDatasets = [
+    { id: 'sent',  type: 'bar',  label: 'Sent',               data: sentData,  backgroundColor: '#c084fc', borderRadius: 4, maxBarThickness: 22, yAxisID: 'y' },
+    { id: 'impr',  type: 'bar',  label: 'Impression',         data: imprData,  backgroundColor: '#2e6bf0', borderRadius: 4, maxBarThickness: 22, yAxisID: 'y' },
+    { id: 'click', type: 'bar',  label: 'Click',              data: clickData, backgroundColor: '#1fb17a', borderRadius: 4, maxBarThickness: 22, yAxisID: 'y' },
+    { id: 'ctr',   type: 'line', label: '% Click / Impression',data: ctrData,   borderColor: '#ff8a3d', backgroundColor: '#ff8a3d', borderWidth: 1.5, tension: .3, pointRadius: 0.5, pointBackgroundColor: '#ff8a3d', fill: false, yAxisID: 'y1' },
+    { id: 'cps',   type: 'line', label: '% Click / Sent',      data: cpsData,   borderColor: '#e11d48', backgroundColor: '#e11d48', borderWidth: 1.5, tension: .3, pointRadius: 0.5, pointBackgroundColor: '#e11d48', fill: false, yAxisID: 'y1' }
+  ];
+
+  // 4. Lọc danh sách dataset dựa theo Checkbox đang chọn
+  const activeDatasets = allDatasets.filter(ds => {
+    const cb = document.querySelector(`.metric-cb[value="${ds.id}"]`);
+    return cb ? cb.checked : true;
+  });
+
+  if(comboChartInst) comboChartInst.destroy();
+
+  comboChartInst = new Chart(el, {
+    data:{
+      labels: dispLabels,
+      datasets: activeDatasets
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      interaction:{mode:'index', intersect:false},
+      onClick:(event, elements) => {
+        if (gran !== 'daily') return;
+
+        const activeElements = elements.length
+          ? elements
+          : comboChartInst.getElementsAtEventForMode(event, 'index', { intersect: false }, true);
+        let dateIndex = activeElements.length ? activeElements[0].index : -1;
+
+        if (dateIndex < 0 && comboChartInst.scales.x && typeof event.x === 'number') {
+          dateIndex = Math.round(comboChartInst.scales.x.getValueForPixel(event.x));
+        }
+
+        const date = labels[dateIndex];
+        const from = document.getElementById('dateFrom');
+        const to = document.getElementById('dateTo');
+        if (!date || !from || !to) return;
+        from.value = date;
+        to.value = date;
+        applyFilters();
+        toast('Đã lọc dashboard theo ngày ' + date);
+      },
+      layout: {
+        padding: { top: 5 }
+      },
+      plugins:{
+        legend:{
+          position:'top',
+          align:'start',
+          labels:{
+            boxWidth:8,
+            padding:14,
+            font:{size:12, weight:'500'},
+            color:'#4a4f76'
+          }
+        },
+        tooltip:{
+          callbacks:{
+            label: c => c.dataset.label + ': ' + (c.dataset.yAxisID === 'y1' ? c.parsed.y + '%' : fmt(c.parsed.y))
+          }
+        }
+      },
+      scales:{
+        y:{
+          position:'left',
+          min: 0,
+          grace: '5%',
+          grid:{color:'#eef0f8'},
+          ticks:{callback:v=>fmt(v), font:{size:10.5}}
+        },
+        y1:{
+          position:'right',
+          min: 0,
+          max: 80,
+          grid:{drawOnChartArea:false},
+          ticks:{callback:v=>v+'%', font:{size:10.5}}
+        },
+        x:{ grid:{display:false}, ticks:{font:{size:10}, maxTicksLimit:16} }
+      }
+    },
+    plugins: [{
+      id: 'legendMargin',
+      beforeInit(chart) {
+        const fitValue = chart.legend.fit;
+        chart.legend.fit = function fit() {
+          fitValue.bind(chart.legend)();
+          return this.height += 15;
+        };
+      }
+    }]
+  });
+}
+
+
+
+function renderOverviewSection(){
+  renderProductDonut();
+  renderPicDonut();
+  renderTopicBarChart();
+  renderComboChart();
+}
+
+
+/* ======================= PRODUCT CHART ======================= */
+// function renderProductChart(){
+//   const products = [...new Set(FILTERED.map(r=>r.product))].sort();
+//   const pnByP = products.map(p=> FILTERED.filter(r=>r.product===p && r.type==='PN').reduce((a,r)=>a+r.impression,0));
+//   const arByP = products.map(p=> FILTERED.filter(r=>r.product===p && r.type==='AR').reduce((a,r)=>a+r.impression,0));
+
+//   document.getElementById('legendProduct').innerHTML = `
+//     <span class="${seriesVisible.PN?'':'off'}" data-series="PN" data-chart="product"><i style="background:#2e6bf0"></i>PN (Impression)</span>
+//     <span class="${seriesVisible.AR?'':'off'}" data-series="AR" data-chart="product"><i style="background:#ff8a3d"></i>AR (Impression)</span>`;
+
+//   if(productChartInst) productChartInst.destroy();
+//   const ctx = document.getElementById('productChart');
+//   productChartInst = new Chart(ctx, {
+//     type:'bar',
+//     data:{ labels: products, datasets:[
+//       {label:'PN', data:pnByP, backgroundColor:'#2e6bf0', borderRadius:6, maxBarThickness:42, hidden:!seriesVisible.PN},
+//       {label:'AR', data:arByP, backgroundColor:'#ff8a3d', borderRadius:6, maxBarThickness:42, hidden:!seriesVisible.AR}
+//     ]},
+//     options:{
+//       responsive:true, maintainAspectRatio:false,
+//       onClick:(evt, elements)=>{
+//         if(elements.length){
+//           const p = products[elements[0].index];
+//           document.getElementById('taskSearch').dataset.productHint = p;
+//           toast('Đã chọn product: ' + p + ' (xem bảng chi tiết bên dưới)');
+//         }
+//       },
+//       plugins:{ legend:{display:false}, tooltip:{callbacks:{label:(c)=> c.dataset.label+': '+fmt(c.parsed.y)}} },
+//       scales:{ y:{grid:{color:'#eef0f8'}, ticks:{callback:v=>fmt(v), font:{size:10.5}}}, x:{grid:{display:false}, ticks:{font:{size:11.5,weight:'600'}}} }
+//     }
+//   });
+//   wireLegendClicks();
+// }
+
+let productDonutInst = null;
+let picDonutInst = null;
+let comboChartInst = null;
+let topicBarInst = null;
+
+
+// /* ======================= DAILY CHART ======================= */
+// function renderDailyChart(){
+//   const gran = document.getElementById('granularitySelect').value;
+//   let labels, pnSeries, arSeries;
+
+//   if(gran === 'daily'){
+//     labels = [...new Set(FILTERED.map(r=>r.date))].sort();
+//     pnSeries = labels.map(d=> FILTERED.filter(r=>r.date===d && r.type==='PN').reduce((a,r)=>a+r.impression,0));
+//     arSeries = labels.map(d=> FILTERED.filter(r=>r.date===d && r.type==='AR').reduce((a,r)=>a+r.impression,0));
+//   } else {
+//     const allDates = [...new Set(FILTERED.map(r=>r.date))].sort();
+//     const weekMap = {};
+//     allDates.forEach(d=>{
+//       const dt = new Date(d);
+//       const weekStart = new Date(dt); weekStart.setDate(dt.getDate() - dt.getDay());
+//       const key = dateStr(weekStart);
+//       weekMap[key] = weekMap[key] || {pn:0, ar:0};
+//     });
+//     FILTERED.forEach(r=>{
+//       const dt = new Date(r.date);
+//       const weekStart = new Date(dt); weekStart.setDate(dt.getDate() - dt.getDay());
+//       const key = dateStr(weekStart);
+//       weekMap[key] = weekMap[key] || {pn:0, ar:0};
+//       weekMap[key][r.type==='PN'?'pn':'ar'] += r.impression;
+//     });
+//     labels = Object.keys(weekMap).sort();
+//     pnSeries = labels.map(k=>weekMap[k].pn);
+//     arSeries = labels.map(k=>weekMap[k].ar);
+//     labels = labels.map(l=> 'Tuần ' + l.slice(5));
+//   }
+
+//   document.getElementById('legendDaily').innerHTML = `
+//     <span class="${seriesVisible.PN?'':'off'}" data-series="PN" data-chart="daily"><i style="background:#2e6bf0"></i>PN (Impression)</span>
+//     <span class="${seriesVisible.AR?'':'off'}" data-series="AR" data-chart="daily"><i style="background:#ff8a3d"></i>AR (Impression)</span>`;
+
+//   if(dailyChartInst) dailyChartInst.destroy();
+//   const ctx = document.getElementById('dailyChart');
+//   dailyChartInst = new Chart(ctx, {
+//     type:'line',
+//     data:{ labels, datasets:[
+//       {label:'PN', data:pnSeries, borderColor:'#2e6bf0', backgroundColor:'rgba(46,107,240,0.08)', tension:.35, pointRadius:2, borderWidth:2, fill:true, hidden:!seriesVisible.PN},
+//       {label:'AR', data:arSeries, borderColor:'#ff8a3d', backgroundColor:'rgba(255,138,61,0.08)', tension:.35, pointRadius:2, borderWidth:2, fill:true, hidden:!seriesVisible.AR}
+//     ]},
+//     options:{
+//       responsive:true, maintainAspectRatio:false,
+//       plugins:{ legend:{display:false}, tooltip:{mode:'index', intersect:false, callbacks:{label:(c)=> c.dataset.label+': '+fmt(c.parsed.y)}} },
+//       interaction:{mode:'index', intersect:false},
+//       scales:{ y:{grid:{color:'#eef0f8'}, ticks:{callback:v=>fmt(v), font:{size:10.5}}}, x:{grid:{display:false}, ticks:{font:{size:10}, maxTicksLimit:8}} }
+//     }
+//   });
+//   wireLegendClicks();
+// }
+
+// function wireLegendClicks(){
+//   document.querySelectorAll('.legend-row span').forEach(el=>{
+//     el.onclick = ()=>{
+//       const s = el.dataset.series;
+//       seriesVisible[s] = !seriesVisible[s];
+//       renderProductChart();
+//       renderDailyChart();
+//     };
+//   });
+// }
+</script>
