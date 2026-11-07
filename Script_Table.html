@@ -1,0 +1,419 @@
+<!-- # JS: Render bảng dữ liệu, Sparkline, Export  -->
+<script>
+/* ======================= DETAIL TABLE & SPARKLINE ======================= */
+function buildTaskAggregates(records = FILTERED) {
+  const map = {};
+
+  records.forEach(r => {
+    const key = r.taskId + '|' + r.type;
+    const sentDate = r.sentDate || r.date;
+
+    if (!map[key]) {
+      map[key] = {
+        taskId: r.taskId,
+        taskName: r.taskName,
+        latestDate: r.date,
+        latestSentDate: sentDate,
+        type: r.type,
+        product: r.product,
+        pic: r.pic,
+        title: r.title || '',     // <--- THÊM DÒNG NÀY
+        content: r.content || '', // <--- THÊM DÒNG NÀY
+        totalSent: 0,
+        totalImpr: 0,
+        totalClick: 0,
+        dailySent: {},
+        dailyImpr: {},
+        dailyClick: {},
+        dailySpam: {}
+      };
+    }
+    if (r.date > map[key].latestDate) map[key].latestDate = r.date;
+    if (r.date > map[key].latestDate) map[key].latestDate = r.date;
+    if (sentDate > map[key].latestSentDate) map[key].latestSentDate = sentDate;
+
+    // Cộng dồn các metric
+    map[key].totalSent += r.sent;
+    map[key].totalImpr += r.impression;
+    map[key].totalClick += r.click;
+    // Lưu theo ngày
+    // Lưu theo ngày
+    map[key].dailySent[sentDate] = (map[key].dailySent[sentDate] || 0) + r.sent;
+    map[key].dailyImpr[r.date] = (map[key].dailyImpr[r.date] || 0) + r.impression;
+    map[key].dailyClick[r.date] = (map[key].dailyClick[r.date] || 0) + r.click;
+    map[key].dailySpam[sentDate] = (map[key].dailySpam[sentDate] || 0) + (r.spam || 0);
+  });
+
+  // Tính CTR tổng cho từng task
+  return Object.values(map).map(t => {
+    t.latestSent = t.dailySent[t.latestSentDate] || 0;
+    t.ctr = t.totalImpr > 0 ? (t.totalClick / t.totalImpr) : 0;
+    return t;
+  });
+}
+
+function syncTopicFilterOptions(){
+  const optionsEl = document.getElementById('topicFilterOptions');
+  if (!optionsEl) return;
+  const topics = [...new Set(RAW.map(r => String(r.topic || 'Chưa phân loại').trim() || 'Chưa phân loại'))].sort((a, b) => a.localeCompare(b));
+  const optionsKey = JSON.stringify(topics);
+  if (optionsEl.dataset.key !== optionsKey) {
+    const availableTopics = new Set(topics);
+    selectedTableTopics = new Set([...selectedTableTopics].filter(topic => availableTopics.has(topic)));
+    optionsEl.replaceChildren();
+    if (topics.length) {
+      topics.forEach(topic => {
+        const label = document.createElement('label');
+        label.className = 'topic-filter-option';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = topic;
+        checkbox.checked = selectedTableTopics.has(topic);
+        const text = document.createElement('span');
+        text.textContent = topic;
+        label.append(checkbox, text);
+        optionsEl.appendChild(label);
+      });
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'topic-filter-empty';
+      empty.textContent = 'Không có Topic';
+      optionsEl.appendChild(empty);
+    }
+    optionsEl.dataset.key = optionsKey;
+    filterTopicOptions();
+    updateTopicSelectionCount();
+  }
+}
+
+function filterTopicOptions(){
+  const optionsEl = document.getElementById('topicFilterOptions');
+  const searchEl = document.getElementById('tableTopicSearch');
+  if (!optionsEl || !searchEl) return;
+  const query = searchEl.value.trim().toLocaleLowerCase();
+  optionsEl.querySelectorAll('.topic-filter-option').forEach(option => {
+    option.hidden = !option.textContent.toLocaleLowerCase().includes(query);
+  });
+}
+
+function updateTopicSelectionCount(){
+  const countEl = document.getElementById('topicSelectionCount');
+  if (countEl) countEl.textContent = selectedTableTopics.size ? `Đã chọn ${selectedTableTopics.size}` : 'Tất cả';
+}
+
+function renderTable(){
+  syncTopicFilterOptions();
+  const metric = (typeof dayMetric !== 'undefined') ? dayMetric : 'sent';
+  const metricDate = r => (metric === 'sent' || metric === 'spam') ? (r.sentDate || r.date) : r.date;
+  const daysAsc = [...new Set(FILTERED.map(metricDate).filter(Boolean))].sort();   // dùng cho sparkline
+  const days = [...daysAsc].reverse();
+  const tableRecords = selectedTableTopics.size
+    ? FILTERED.filter(r => selectedTableTopics.has(String(r.topic || 'Chưa phân loại').trim() || 'Chưa phân loại'))
+    : FILTERED;
+  let tasks = buildTaskAggregates(tableRecords);
+
+  // 1. Lọc Task Name Search
+  const q = document.getElementById('tableSearch').value.trim().toLowerCase();
+  if(q) tasks = tasks.filter(t=> t.taskName.toLowerCase().includes(q));
+
+  // 2. Lấy Metric được chọn
+  // const metric = document.getElementById('tableMetricSelect') ? document.getElementById('tableMetricSelect').value : 'impr';
+  const metricTitleMap = {
+    impr: 'Impression (Event)',
+    sent: 'Sent (User)',
+    click: 'Click (Event)',
+    ctr: 'Tỷ lệ CTR (Click/Impression)',
+    spam: '%Spam (Spam/Sent)'
+  };
+
+  tasks.sort((a,b)=>{
+    let av = a[sort.key], bv = b[sort.key];
+    if(typeof av === 'string'){ av=av.toLowerCase(); bv=bv.toLowerCase(); }
+    if(av < bv) return sort.dir==='asc'? -1: 1;
+    if(av > bv) return sort.dir==='asc'? 1: -1;
+    if(sort.key === 'latestDate') return b.latestSent - a.latestSent;
+    return 0;
+  });
+
+  // 3. Tính số lượng cột cố định bên trái (bao gồm Title & Content nếu mở)
+  const fixedColsCount = 2
+    + (visibleCols.title ? 1 : 0) 
+    + (visibleCols.content ? 1 : 0) 
+    + (visibleCols.sent ? 1 : 0) 
+    + (visibleCols.ctr ? 1 : 0)
+    + (visibleCols.impr ? 1 : 0)
+    + (visibleCols.click ? 1 : 0);
+
+  // Render Header Group
+  const grpRow = document.getElementById('grpRow');
+  const headRow = document.getElementById('headRow');
+  let grpHtml = `<th class="sticky-h" colspan="${fixedColsCount}" style="background:#fff;"></th>`;
+  if(visibleCols.days) grpHtml += `<th colspan="${days.length}">${metricTitleMap[metric]} theo ngày</th>`;
+  grpRow.innerHTML = grpHtml;
+  
+  // // Ghim label "... theo ngày" ngay sau vùng cột cố định
+  // if(visibleCols.days){
+  //   const spacer = document.getElementById('grpSpacer');
+  //   const dayLabel = grpRow.querySelector('.grp-daylabel');
+  //   if(spacer && dayLabel){
+  //     dayLabel.style.position = 'sticky';
+  //     dayLabel.style.left = spacer.offsetWidth + 'px';
+  //     dayLabel.style.zIndex = 3;
+  //     dayLabel.style.background = '#eef0fb'; // trùng màu nền .grp th để không bị hở
+  //   }
+  // }
+
+  const sortArrow = (key)=> sort.key===key ? `<span class="arrow">${sort.dir==='asc'?'▲':'▼'}</span>` : `<span class="arrow">↕</span>`;
+  const sortCls = (key)=> 'sortable' + (sort.key===key ? ' active':'');
+
+  let headHtml = `
+    <th class="sticky-h">#</th>
+    <th class="sticky-h ${sortCls('latestDate')}" data-sort="latestDate" title="Sắp xếp theo ngày xuất hiện gần nhất" style="min-width:200px;">Task Name ${sortArrow('latestDate')}</th>
+    ${visibleCols.title ? `<th class="sticky-h" style="min-width:180px;">Title</th>` : ''}
+    ${visibleCols.content ? `<th class="sticky-h" style="min-width:220px;">Content</th>` : ''}
+    ${visibleCols.sent? `<th class="${sortCls('totalSent')}" data-sort="totalSent">Sent ${sortArrow('totalSent')}</th>`:''}
+    ${visibleCols.impr? `<th class="${sortCls('totalImpr')}" data-sort="totalImpr">Impresion ${sortArrow('totalImpr')}</th>`:''}
+    ${visibleCols.click? `<th class="${sortCls('totalClick')}" data-sort="totalClick">Click ${sortArrow('totalClick')}</th>`:''}
+    ${visibleCols.ctr? `<th class="${sortCls('ctr')}" data-sort="ctr">CTR ${sortArrow('ctr')}</th>`:''}
+  `;
+  if(visibleCols.days) days.forEach(d=> headHtml += `<th class="day">${d.slice(5)}</th>`);
+  // headHtml += `
+  //   <th class="day ${sortCls('totalSent')}" data-sort="totalSent">Total Sent ${sortArrow('totalSent')}</th>
+  //   <th class="day ${sortCls('totalImpr')}" data-sort="totalImpr">Total Impr. ${sortArrow('totalImpr')}</th>
+  //   <th class="day ${sortCls('totalClick')}" data-sort="totalClick">Total Click ${sortArrow('totalClick')}</th>
+  //   <th class="day ${sortCls('ctr')}" data-sort="ctr">CTR ${sortArrow('ctr')}</th>
+  // `;
+  headRow.innerHTML = headHtml;
+
+  headRow.querySelectorAll('th[data-sort]').forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const key = th.dataset.sort;
+      if(sort.key===key) sort.dir = sort.dir==='asc'?'desc':'asc'; else { sort.key=key; sort.dir='desc'; }
+      renderTable();
+    });
+  });
+
+  // Render Body Dữ liệu
+  const bodyRows = document.getElementById('bodyRows');
+  bodyRows.innerHTML = '';
+  tasks.forEach((t,i)=>{
+    const key = t.taskId+'|'+t.type;
+    const tr = document.createElement('tr');
+    if(expandedTaskKey===key) tr.classList.add('expanded');
+
+    let dayCells = '';
+    if(visibleCols.days) {
+      dayCells = days.map(d => {
+        if(metric === 'sent') return `<td class="day">${fmtFull(t.dailySent[d] || 0)}</td>`;
+        if(metric === 'click') return `<td class="day">${fmtFull(t.dailyClick[d] || 0)}</td>`;
+        if(metric === 'spam') {
+          if(t.type !== 'PN') return '<td class="day">—</td>';
+          const sent = t.dailySent[d] || 0;
+          const spam = t.dailySpam[d] || 0;
+          return `<td class="day">${sent ? ((spam / sent) * 100).toFixed(1) + '%' : '0%'}</td>`;
+        }
+        if(metric === 'ctr') {
+          const impr = t.dailyImpr[d] || 0;
+          const clk = t.dailyClick[d] || 0;
+          return `<td class="day">${impr ? ((clk / impr) * 100).toFixed(1) + '%' : '0%'}</td>`;
+        }
+        return `<td class="day">${fmtFull(t.dailyImpr[d] || 0)}</td>`;
+      }).join('');
+    }
+
+    const titleText = t.title || '';
+    const contentText = t.content || '';
+
+    // Xử lý an toàn dấu ngoặc kép trong tooltip title
+    const safeTitleAttr = titleText.replace(/"/g, '&quot;');
+    const safeContentAttr = contentText.replace(/"/g, '&quot;');
+
+
+
+    // CẤU TRÚC CHÍNH CỦA BẢNG
+    tr.innerHTML = `
+      <td class="sticky">${i+1}</td>
+      <td class="sticky" style="font-weight:600;">${t.taskName}</td>
+      
+      ${visibleCols.title ? `
+        <td title="${safeTitleAttr}">
+          <div class="cell-truncate" style="max-width: 180px;">${titleText}</div>
+        </td>
+      ` : ''}
+
+      ${visibleCols.content ? `
+        <td title="${safeContentAttr}">
+          <div class="cell-truncate" style="max-width: 220px;">${contentText}</div>
+        </td>
+      ` : ''}
+
+      ${visibleCols.sent? `<td class="total-col">${fmtFull(t.totalSent)}</td>`:''}
+      ${visibleCols.impr? `<td class="total-col">${fmtFull(t.totalImpr)}</td>`:''}
+      ${visibleCols.click? `<td class="total-col">${fmtFull(t.totalClick)}</td>`:''}
+      ${visibleCols.ctr? `<td class="total-col">${(t.ctr*100).toFixed(1)}%</td>`:''}
+
+
+      ${dayCells}
+
+
+    `;
+    tr.addEventListener('click', ()=> toggleSpark(key, t, daysAsc, metric));
+    bodyRows.appendChild(tr);
+
+    if(expandedTaskKey===key){
+      const sparkTr = document.createElement('tr');
+      sparkTr.className='spark-row';
+      sparkTr.innerHTML = `<td colspan="${fixedColsCount + (visibleCols.days?days.length:0)}"><div class="spark-wrap"><canvas id="sparkCanvas"></canvas></div></td>`;
+      bodyRows.appendChild(sparkTr);
+      setTimeout(()=> drawSparkline(t, daysAsc, metric), 0);
+    }
+  });
+
+  document.getElementById('rowCountHint').textContent = tasks.length + ' task';
+}
+
+const SPARKLINE_SIGMA_MULTIPLIER = 3;
+let sparkChartInst;
+function toggleSpark(key, t, days, metric){
+  expandedTaskKey = (expandedTaskKey===key) ? null : key;
+  renderTable();
+}
+
+function drawSparkline(t, days, metric){
+  const ctx = document.getElementById('sparkCanvas');
+  if(!ctx) return;
+  if(sparkChartInst) sparkChartInst.destroy();
+
+  const sparkValues = days.map(d => {
+    if(metric === 'sent') return t.dailySent[d] || 0;
+    if(metric === 'click') return t.dailyClick[d] || 0;
+    if(metric === 'spam') {
+      const sent = t.dailySent[d] || 0;
+      return t.type === 'PN' && sent ? Number(((t.dailySpam[d] || 0) / sent * 100).toFixed(2)) : 0;
+    }
+    if(metric === 'ctr') {
+      const impr = t.dailyImpr[d] || 0;
+      const clk = t.dailyClick[d] || 0;
+      return impr ? Number(((clk / impr) * 100).toFixed(2)) : 0;
+    }
+    return t.dailyImpr[d] || 0;
+  });
+
+  const observedValues = sparkValues.filter(value => Number.isFinite(value) && value > 0);
+  const outlierColors = sparkValues.map(() => null);
+  if (observedValues.length >= 2) {
+    const average = observedValues.reduce((sum, value) => sum + value, 0) / observedValues.length;
+    const variance = observedValues.reduce((sum, value) => sum + (value - average) ** 2, 0) / observedValues.length;
+    const sigmaRange = SPARKLINE_SIGMA_MULTIPLIER * Math.sqrt(variance);
+    const upperLimit = average + sigmaRange;
+    const lowerLimit = average - sigmaRange;
+    const highOutlierColor = metric === 'spam' ? '#e53935' : '#43a047';
+    const lowOutlierColor = metric === 'spam' ? '#43a047' : '#e53935';
+
+    sparkValues.forEach((value, index) => {
+      if (value > 0 && value > upperLimit) outlierColors[index] = highOutlierColor;
+      else if (value > 0 && value < lowerLimit) outlierColors[index] = lowOutlierColor;
+    });
+  }
+
+  const pointRadii = outlierColors.map(color => color ? 3.5 : 0);
+  const lineColor = t.type === 'PN' ? '#2e6bf0' : '#ff8a3d';
+  const metricName = {
+    sent: 'Total sent',
+    impr: 'Total impression',
+    click: 'Total click',
+    ctr: 'CTR',
+    spam: '%Spam'
+  }[metric] || 'Value';
+  sparkChartInst = new Chart(ctx, {
+    type:'line',
+    data:{ labels: days.map(d=>d.slice(5)), datasets:[{
+      data: sparkValues,
+      borderColor: lineColor,
+      backgroundColor: t.type==='PN' ? 'rgba(46,107,240,0.1)' : 'rgba(255,138,61,0.1)',
+      fill:true, tension:.35, pointRadius:pointRadii, pointHoverRadius:pointRadii,
+      pointBackgroundColor:outlierColors.map(color => color || lineColor),
+      pointBorderColor:outlierColors.map(color => color || lineColor),
+      borderWidth:2
+    }]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>{
+        const impactColor = outlierColors[c.dataIndex];
+        const value = metric === 'ctr' || metric === 'spam'
+          ? `${c.parsed.y.toFixed(1)}%`
+          : fmtFull(c.parsed.y);
+        if (impactColor) {
+          const impact = impactColor === '#e53935' ? 'Bad impact' : 'Good impact';
+          return `${metricName}: ${value} (${impact})`;
+        }
+        return metric === 'ctr' ? `CTR: ${c.parsed.y}%` : `Value: ${fmtFull(c.parsed.y)}`;
+      }}}},
+      scales:{ y:{display:false}, x:{grid:{display:false}, ticks:{font:{size:9}, maxTicksLimit:10}} }
+    }
+  });
+}
+
+/* ======================= EXPORT CSV ======================= */
+function exportCSV() {
+  if (!FILTERED || !FILTERED.length) {
+    if (typeof toast === 'function') toast('Không có dữ liệu để xuất!');
+    return;
+  }
+
+  // Khởi tạo hàng Header cho CSV
+  const headers = [
+    'Date',
+    'Task Name',
+    'Noti Type',
+    'Product',
+    'PIC',
+    'Title',
+    'Content',
+    'Sent (User)',
+    'Impression (User)',
+    'Click (User)',
+    'CTR (%)'
+  ];
+
+  const csvRows = [headers.join(',')];
+
+  // Helper xử lý chuỗi an toàn chống lỗi xuống dòng/dấu phẩy trong CSV
+  const escapeCsv = (str) => {
+    if (str === null || str === undefined) return '""';
+    return `"${String(str).replace(/"/g, '""')}"`;
+  };
+
+  FILTERED.forEach(r => {
+    const ctr = r.impression > 0 ? ((r.click / r.impression) * 100).toFixed(2) : '0';
+    
+    const row = [
+      r.date,
+      escapeCsv(r.taskName),
+      r.type,
+      escapeCsv(r.product),
+      escapeCsv(r.pic),
+      escapeCsv(r.title),
+      escapeCsv(r.content),
+      r.sent || 0,
+      r.impression || 0,
+      r.click || 0,
+      ctr
+    ];
+    
+    csvRows.push(row.join(','));
+  });
+
+  // Thêm BOM '\uFEFF' để Excel đọc đúng định dạng tiếng Việt / Unicode
+  const csvContent = '\uFEFF' + csvRows.join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `PN_AR_Report_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+</script>

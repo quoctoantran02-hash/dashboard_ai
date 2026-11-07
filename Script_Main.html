@@ -1,0 +1,480 @@
+<!-- # JS: Khởi tạo, State, Event Listeners, demo data -->
+<script>
+/* ======================= STATE & GLOBALS ======================= */
+let RAW = [];           // all records currently loaded (demo or live)
+let FILTERED = [];      // records after filters applied
+let productChartInst, dailyChartInst;
+let sort = { key: 'latestDate', dir: 'desc' };
+let visibleCols = { title: true, content: true, days: true, ctr: true, sent: true, impr: true, click : true };
+let dayMetric = 'sent';   // metric đang hiển thị ở nhóm cột theo ngày
+let currentGranularity = 'daily';
+let donutMetrics = { product: 'tasks', pic: 'tasks' };
+let topicMetric = 'tasks';
+let selectedTableTopics = new Set();
+
+function updateChartMetricTitle(elementId, metric){
+  const el = document.getElementById(elementId);
+  if (el) el.textContent = DONUT_METRIC_LABELS[metric] || metric;
+}
+
+function updateOverviewMetricTitles(){
+  updateChartMetricTitle('productDonutTitleMetric', donutMetrics.product);
+  updateChartMetricTitle('picDonutTitleMetric', donutMetrics.pic);
+  updateChartMetricTitle('topicTitleMetric', topicMetric);
+}
+let expandedTaskKey = null;
+let seriesVisible = { PN: true, AR: true };
+let isDemoMode = false;  // false = live Google Sheet, true = hardcoded demo dataset
+
+/* ======================= DEMO DATASET ======================= */
+const DEMO_DATA = [
+  { date:'2026-05-01', taskId:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', taskName:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', type:'AR', product:'BCL', pic:'Adam', sent:290000, impression:340000, click:220000 },
+  { date:'2026-05-03', taskId:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', taskName:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', type:'PN', product:'BCL', pic:'Alen', sent:310000, impression:375000, click:245000 },
+  { date:'2026-05-05', taskId:'NOTI_VN_SCL_PNACTIVITY_REMIND_PAYMENT', taskName:'NOTI_VN_SCL_PNACTIVITY_REMIND_PAYMENT', type:'PN', product:'SCL', pic:'Cole', sent:330000, impression:405000, click:268000 },
+  { date:'2026-05-07', taskId:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', taskName:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', type:'AR', product:'BCL', pic:'Adam', sent:315000, impression:370000, click:250000 },
+  { date:'2026-05-09', taskId:'NOTI_VN_SPL_PROMO_VOUCHER_100K', taskName:'NOTI_VN_SPL_PROMO_VOUCHER_100K', type:'PN', product:'SPL', pic:'Maz', sent:320000, impression:395000, click:265000 },
+  { date:'2026-05-11', taskId:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', taskName:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', type:'PN', product:'BCL', pic:'Tim', sent:335000, impression:420000, click:285000 },
+  { date:'2026-05-13', taskId:'NOTI_VN_SPL_PROMO_VOUCHER_100K', taskName:'NOTI_VN_SPL_PROMO_VOUCHER_100K', type:'PN', product:'SPL', pic:'Maz', sent:365000, impression:450000, click:295000 },
+  { date:'2026-05-15', taskId:'NOTI_VN_SELLER_RATING_REQUEST', taskName:'NOTI_VN_SELLER_RATING_REQUEST', type:'AR', product:'SCL', pic:'Cole', sent:350000, impression:425000, click:280000 },
+  { date:'2026-05-17', taskId:'NOTI_VN_SPL_PROMO_VOUCHER_100K', taskName:'NOTI_VN_SPL_PROMO_VOUCHER_100K', type:'PN', product:'SPL', pic:'Tim', sent:295000, impression:395000, click:250000 },
+  { date:'2026-05-19', taskId:'NOTI_VN_SCL_PNACTIVITY_REMIND_PAYMENT', taskName:'NOTI_VN_SCL_PNACTIVITY_REMIND_PAYMENT', type:'PN', product:'SCL', pic:'Alen', sent:330000, impression:420000, click:282000 },
+  { date:'2026-05-21', taskId:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', taskName:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', type:'AR', product:'BCL', pic:'Adam', sent:395000, impression:480000, click:320000 },
+  { date:'2026-05-23', taskId:'NOTI_VN_SPL_PROMO_VOUCHER_100K', taskName:'NOTI_VN_SPL_PROMO_VOUCHER_100K', type:'PN', product:'SPL', pic:'Tim', sent:445000, impression:518000, click:370000 },
+  { date:'2026-05-25', taskId:'NOTI_VN_SCL_PNACTIVITY_REMIND_PAYMENT', taskName:'NOTI_VN_SCL_PNACTIVITY_REMIND_PAYMENT', type:'PN', product:'SCL', pic:'Cole', sent:410000, impression:472000, click:315000 },
+  { date:'2026-05-27', taskId:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', taskName:'NOTI_VN_BCL_PNACTIVITY_CAMPAIGN_IVR', type:'PN', product:'BCL', pic:'Alen', sent:385000, impression:442000, click:300000 },
+  { date:'2026-05-29', taskId:'NOTI_VN_SPL_PROMO_VOUCHER_100K', taskName:'NOTI_VN_SPL_PROMO_VOUCHER_100K', type:'PN', product:'SPL', pic:'Maz', sent:438000, impression:510000, click:345000 }
+];
+
+/* ======================= HELPERS ======================= */
+function fmt(n){ if(n>=1000000) return (n/1000000).toFixed(2)+"M"; if(n>=1000) return (n/1000).toFixed(0)+"K"; return String(Math.round(n)); }
+function fmtFull(n){ return Math.round(n).toLocaleString('en-US'); }
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
+function dateStr(d){ return d.toISOString().slice(0,10); }
+function apiUrl(path){
+  const baseUrl = (window.PNAR_API_BASE_URL || '').replace(/\/+$/, '');
+  return baseUrl ? baseUrl + path : path;
+}
+
+/* ======================= LOAD DATA ======================= */
+/* ======================= LOAD DATA (WITH CACHE) ======================= */
+const CACHE_KEY = 'PNAR_DASHBOARD_CACHE_V3_SPAM_SENT_DATE';
+const CACHE_TIME_KEY = 'PNAR_CACHE_TIMESTAMP';
+const EXPIRE_TIME = 24 * 60 * 60 * 1000; // tương đương 86,400,000 ms
+
+function loadData(isRefresh){
+  if(isRefresh){
+    document.getElementById('refreshBtn').classList.add('spinning');
+  } else {
+    document.getElementById('loadingState').style.display='flex';
+    document.getElementById('dashboardBody').style.display='none';
+  }
+
+  if(isDemoMode){
+    setTimeout(function(){
+      RAW = DEMO_DATA;
+      document.getElementById('refreshBtn').classList.remove('spinning');
+      document.getElementById('loadingState').style.display='none';
+      document.getElementById('dashboardBody').style.display='block';
+      if(isRefresh) toast('Đã tải lại dữ liệu giả lập');
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value = '';
+      initFiltersUI();
+      applyFilters();
+    }, isRefresh ? 300 : 200);
+    return;
+  }
+
+  // 1. Nếu không phải bấm nút Làm mới, kiểm tra bộ nhớ tạm (localStorage)
+  if(!isRefresh){
+    const cachedData = localStorage.getItem(CACHE_KEY);
+    const cacheTime = localStorage.getItem(CACHE_TIME_KEY);
+    const now = Date.now();
+
+    if(cachedData && cacheTime && (now - Number(cacheTime) < EXPIRE_TIME)){
+      RAW = JSON.parse(cachedData);
+      document.getElementById('loadingState').style.display='none';
+      document.getElementById('dashboardBody').style.display='block';
+      initFiltersUI();
+      applyFilters();
+      return; // Hiển thị ngay lập tức, ngắt không cần gọi Google Sheet
+    }
+  }
+
+  // 2. Nếu bấm Làm mới hoặc chưa có Cache -> gọi API local
+  fetch(apiUrl('/api/dashboard-data'), { cache: 'no-store' })
+    .then(function(response){
+      return response.json().then(function(data){
+        if(!response.ok) throw new Error(data.error || 'Không thể tải dữ liệu');
+        return data;
+      });
+    })
+    .then(function(data){
+      RAW = data || [];
+
+      // Lưu dữ liệu mới vào Cache
+      localStorage.setItem(CACHE_KEY, JSON.stringify(RAW));
+      localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+
+      document.getElementById('refreshBtn').classList.remove('spinning');
+      document.getElementById('loadingState').style.display='none';
+      document.getElementById('dashboardBody').style.display='block';
+      if(isRefresh) toast('Đã cập nhật dữ liệu mới nhất');
+      initFiltersUI();
+      applyFilters();
+    })
+    .catch(function(err){
+      document.getElementById('refreshBtn').classList.remove('spinning');
+      document.getElementById('loadingState').textContent = '⚠️ Lỗi tải dữ liệu: ' + (err && err.message ? err.message : err);
+      toast('Lỗi tải dữ liệu');
+    });
+}
+
+// function updateModeBadge(){
+//   const badge = document.getElementById('modeBadge');
+//   const label = document.getElementById('switchLabel');
+//   if(isDemoMode){
+//     badge.textContent = 'DEMO';
+//     badge.className = 'mode-badge demo';
+//     label.textContent = 'Đang dùng dữ liệu giả lập';
+//   } else {
+//     badge.textContent = 'LIVE';
+//     badge.className = 'mode-badge live';
+//     label.textContent = 'Đang dùng dữ liệu thật';
+//   }
+// }
+
+/* ======================= EVENT LISTENERS ======================= */
+function wireStaticControls(){
+  updateOverviewMetricTitles();
+  // Hàm bổ trợ gán sự kiện an toàn
+  const safeAddEvent = (id, type, handler) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(type, handler);
+  };
+
+  // 1. Các bộ lọc cơ bản & Bảng
+  safeAddEvent('dateFrom', 'change', applyFilters);
+  safeAddEvent('dateTo', 'change', applyFilters);
+  safeAddEvent('taskSearch', 'input', applyFilters);
+  safeAddEvent('tableSearch', 'input', () => { renderTable(); });
+  safeAddEvent('tableTopicSearch', 'input', filterTopicOptions);
+  safeAddEvent('tableTopicSearch', 'focus', openTopicFilterMenu);
+  safeAddEvent('tableTopicSearch', 'click', e => {
+    e.stopPropagation();
+    openTopicFilterMenu();
+  });
+  safeAddEvent('refreshBtn', 'click', () => loadData(true));
+  safeAddEvent('tableTypeSelect', 'change', renderTable);
+  safeAddEvent('tableMetricSelect', 'change', renderTable);
+  safeAddEvent('exportBtn', 'click', exportCSV);
+
+  // 2. An/hiện cột trong Bảng (Table)
+  safeAddEvent('toggleTitle', 'change', e => { visibleCols.title = e.target.checked; renderTable(); });
+  safeAddEvent('toggleContent', 'change', e => { visibleCols.content = e.target.checked; renderTable(); });
+  document.querySelectorAll('.day-metric-radio').forEach(r=>{r.addEventListener('change', e=>{dayMetric = e.target.value;renderTable();});});
+  safeAddEvent('toggleDayCols', 'change', e => { visibleCols.days = e.target.checked; renderTable(); });
+  safeAddEvent('toggleCTR', 'change', e => { visibleCols.ctr = e.target.checked; renderTable(); });
+  safeAddEvent('toggleSent', 'change', e => { visibleCols.sent = e.target.checked; renderTable(); });
+
+  // 3. Demo Mode
+  const demoToggle = document.getElementById('demoModeToggle');
+  if (demoToggle) {
+    demoToggle.addEventListener('change', function(e){
+      isDemoMode = e.target.checked;
+      updateModeBadge();
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value = '';
+      document.getElementById('taskSearch').value = '';
+      loadData(false);
+    });
+  }
+
+  // 4. Clear Filters
+  const clearBtn = document.getElementById('clearFilters');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', ()=>{
+      document.querySelectorAll('#productChips .chip').forEach(c=>c.classList.add('on'));
+      // typeChips: reset về mặc định chỉ chọn PN
+      document.querySelectorAll('#typeChips .chip').forEach(c=>{
+        c.classList.toggle('on', c.dataset.type === 'PN');
+      });
+      const taskSearchEl = document.getElementById('taskSearch');
+      if (taskSearchEl) taskSearchEl.value = '';
+      if(RAW.length){
+        const defaultRange = getDefaultDateRange();
+        const df = document.getElementById('dateFrom');
+        const dt = document.getElementById('dateTo');
+        if (df) df.value = defaultRange.from;
+        if (dt) dt.value = defaultRange.to;
+      }
+      applyFilters();
+    });
+  }
+
+  // ==================== CÁC DROPDOWN MENUS ====================
+
+  const colsMenu = document.getElementById('colsMenu');             // Menu Cột Bảng
+  const granMenu = document.getElementById('granMenu');             // Menu Daily/Weekly
+  const chartColsMenu = document.getElementById('chartColsMenu');   // Menu Chỉ số Chart
+  const productDonutMetricMenu = document.getElementById('productDonutMetricMenu');
+  const picDonutMetricMenu = document.getElementById('picDonutMetricMenu');
+  const topicMetricMenu = document.getElementById('topicMetricMenu');
+  const topicFilterMenu = document.getElementById('topicFilterMenu');
+  const topicFilterWrapper = document.getElementById('topicFilterWrapper');
+
+  function openTopicFilterMenu(){
+    if (!topicFilterMenu) return;
+    closeAllMenus();
+    topicFilterMenu.classList.add('show');
+    const topicSearch = document.getElementById('tableTopicSearch');
+    if (topicSearch) topicSearch.setAttribute('aria-expanded', 'true');
+  }
+
+  // Hàm bổ trợ đóng tất cả menu khi click ra ngoài
+  function closeAllMenus() {
+    if (colsMenu) colsMenu.classList.remove('show');
+    if (granMenu) granMenu.classList.remove('show');
+    if (chartColsMenu) chartColsMenu.classList.remove('show');
+    if (productDonutMetricMenu) productDonutMetricMenu.classList.remove('show');
+    if (picDonutMetricMenu) picDonutMetricMenu.classList.remove('show');
+    if (topicMetricMenu) topicMetricMenu.classList.remove('show');
+    if (topicFilterMenu) topicFilterMenu.classList.remove('show');
+    const topicSearch = document.getElementById('tableTopicSearch');
+    if (topicSearch) topicSearch.setAttribute('aria-expanded', 'false');
+  }
+
+  // Ngăn sự kiện click bên trong menu làm đóng menu
+  if (colsMenu) colsMenu.addEventListener('click', e => e.stopPropagation());
+  if (granMenu) granMenu.addEventListener('click', e => e.stopPropagation());
+  if (chartColsMenu) chartColsMenu.addEventListener('click', e => e.stopPropagation());
+  if (productDonutMetricMenu) productDonutMetricMenu.addEventListener('click', e => e.stopPropagation());
+  if (picDonutMetricMenu) picDonutMetricMenu.addEventListener('click', e => e.stopPropagation());
+  if (topicMetricMenu) topicMetricMenu.addEventListener('click', e => e.stopPropagation());
+  if (topicFilterMenu) topicFilterMenu.addEventListener('click', e => e.stopPropagation());
+  if (topicFilterWrapper) topicFilterWrapper.addEventListener('click', e => e.stopPropagation());
+
+  const topicFilterOptions = document.getElementById('topicFilterOptions');
+  if (topicFilterOptions) {
+    topicFilterOptions.addEventListener('change', e => {
+      const checkbox = e.target.closest('input[type="checkbox"]');
+      if (!checkbox) return;
+      if (checkbox.checked) selectedTableTopics.add(checkbox.value);
+      else selectedTableTopics.delete(checkbox.value);
+      updateTopicSelectionCount();
+      renderTable();
+    });
+  }
+
+  const clearTopicSelection = document.getElementById('clearTopicSelection');
+  if (clearTopicSelection) {
+    clearTopicSelection.addEventListener('click', () => {
+      selectedTableTopics.clear();
+      if (topicFilterOptions) {
+        topicFilterOptions.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+          checkbox.checked = false;
+        });
+      }
+      updateTopicSelectionCount();
+      renderTable();
+    });
+  }
+
+  // A. Dropdown Cột Bảng (#colsBtn)
+  const colsBtn = document.getElementById('colsBtn');
+  if (colsBtn && colsMenu) {
+    colsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isShow = colsMenu.classList.contains('show');
+      closeAllMenus();
+      if (!isShow) colsMenu.classList.add('show');
+    });
+  }
+
+  // B. Dropdown Granularity (#granBtn) - [MỚI]
+  const granBtn = document.getElementById('granBtn');
+  const granText = document.getElementById('granText');
+
+  if (granBtn && granMenu) {
+    granBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isShow = granMenu.classList.contains('show');
+      closeAllMenus();
+      if (!isShow) granMenu.classList.add('show');
+    });
+
+    granMenu.querySelectorAll('.gran-option').forEach(opt => {
+      opt.addEventListener('click', () => {
+        granMenu.querySelectorAll('.gran-option').forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+
+        // Cập nhật biến currentGranularity (Nhớ khai báo `let currentGranularity = 'daily'` ở đầu file JS)
+        currentGranularity = opt.getAttribute('data-value');
+        if (granText) granText.textContent = opt.textContent;
+
+        closeAllMenus();
+        renderComboChart(); // Vẽ lại chart khi đổi sang Weekly/Daily
+      });
+    });
+  }
+
+  // C. Dropdown Chọn chỉ số Chart (#chartColsBtn) - [MỚI]
+  const chartColsBtn = document.getElementById('chartColsBtn');
+
+  if (chartColsBtn && chartColsMenu) {
+    chartColsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isShow = chartColsMenu.classList.contains('show');
+      closeAllMenus();
+      if (!isShow) chartColsMenu.classList.add('show');
+    });
+
+    // Bắt sự kiện check/uncheck các metric
+    chartColsMenu.querySelectorAll('.metric-cb').forEach(cb => {
+      cb.addEventListener('change', renderComboChart);
+    });
+  }
+
+  [['product', 'productDonutMetricBtn', 'productDonutMetricMenu'],
+   ['pic', 'picDonutMetricBtn', 'picDonutMetricMenu']].forEach(([key, buttonId, menuId]) => {
+    const button = document.getElementById(buttonId);
+    const menu = document.getElementById(menuId);
+    if (!button || !menu) return;
+
+    button.addEventListener('click', e => {
+      e.stopPropagation();
+      const isShow = menu.classList.contains('show');
+      closeAllMenus();
+      if (!isShow) menu.classList.add('show');
+    });
+
+    menu.querySelectorAll('.donut-metric-radio').forEach(radio => {
+      radio.addEventListener('change', e => {
+        donutMetrics[key] = e.target.value;
+        updateChartMetricTitle(key === 'product' ? 'productDonutTitleMetric' : 'picDonutTitleMetric', e.target.value);
+        closeAllMenus();
+        renderOverviewSection();
+      });
+    });
+  });
+
+  const topicMetricBtn = document.getElementById('topicMetricBtn');
+  if (topicMetricBtn && topicMetricMenu) {
+    topicMetricBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const isShow = topicMetricMenu.classList.contains('show');
+      closeAllMenus();
+      if (!isShow) topicMetricMenu.classList.add('show');
+    });
+
+    topicMetricMenu.querySelectorAll('.topic-metric-radio').forEach(radio => {
+      radio.addEventListener('change', e => {
+        topicMetric = e.target.value;
+        updateChartMetricTitle('topicTitleMetric', topicMetric);
+        closeAllMenus();
+        renderTopicBarChart();
+      });
+    });
+  }
+
+  const aiInsightBtn = document.getElementById('aiInsightBtn');
+  const aiInsightPanel = document.getElementById('aiInsightPanel');
+  const aiInsightCollapseBtn = document.getElementById('aiInsightCollapseBtn');
+  const toggleAIInsight = () => {
+    if (!aiInsightPanel) return;
+    const isOpen = aiInsightPanel.classList.toggle('show');
+    aiInsightPanel.setAttribute('aria-hidden', String(!isOpen));
+  };
+  if (aiInsightBtn) aiInsightBtn.addEventListener('click', toggleAIInsight);
+  if (aiInsightCollapseBtn) aiInsightCollapseBtn.addEventListener('click', toggleAIInsight);
+  wireAIChat();
+
+  // Lắng nghe Click toàn cục ra ngoài vùng menu để đóng tất cả
+  document.addEventListener('click', closeAllMenus);
+}
+
+function wireAIChat(){
+  const form = document.getElementById('aiChatForm');
+  const input = document.getElementById('aiChatInput');
+  const sendButton = document.getElementById('aiChatSendBtn');
+  const messages = document.getElementById('aiChatMessages');
+  const newChatButton = document.getElementById('aiChatNewBtn');
+  if (!form || !input || !sendButton || !messages) return;
+
+  let threadId = '';
+  const welcomeMessage = 'Xin chào! Mình là Dior, trợ lý của Đào, mình có thể giúp bạn:\n- Phân tích thực trạng spam PN/AR trong timerange bạn đang filter\n- Giúp bạn tra cứu các user_id bị spam vào 1 ngày cụ thể, của 1 PN cụ thể\n- Gửi báo cáo tổng hợp về những đặc điểm của của các PN mang lại hiệu quả cao\nHoặc bất kì câu hỏi nào về dữ liệu PN, feel free to ask nhé! ^^';
+
+  const addMessage = (text, role) => {
+    const message = document.createElement('div');
+    message.className = 'ai-chat-message ' + role;
+    if (role === 'assistant') {
+      const row = document.createElement('div');
+      row.className = 'ai-chat-message-row assistant';
+      const avatar = document.createElement('img');
+      avatar.className = 'ai-chat-avatar';
+      avatar.src = '/dior.png';
+      avatar.alt = 'Dior';
+      row.appendChild(avatar);
+      message.textContent = text;
+      row.appendChild(message);
+      messages.appendChild(row);
+    } else {
+      message.textContent = text;
+      messages.appendChild(message);
+    }
+    messages.scrollTop = messages.scrollHeight;
+    return message;
+  };
+
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.altKey || event.isComposing) return;
+    event.preventDefault();
+    form.requestSubmit();
+  });
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const message = input.value.trim();
+    if (!message || sendButton.disabled) return;
+
+    addMessage(message, 'user');
+    input.value = '';
+    input.disabled = true;
+    sendButton.disabled = true;
+    const pending = addMessage('Đang chờ AI trả lời…', 'assistant');
+
+    try {
+      const response = await fetch(apiUrl('/api/ai-chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, thread_id: threadId })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không thể gửi tin nhắn.');
+      threadId = data.thread_id || threadId;
+      pending.textContent = data.reply || 'AI không trả về nội dung.';
+    } catch (error) {
+      pending.classList.add('error');
+      pending.textContent = error.message || 'Không thể kết nối Agent AI.';
+    } finally {
+      input.disabled = false;
+      sendButton.disabled = false;
+      input.focus();
+      messages.scrollTop = messages.scrollHeight;
+    }
+  });
+
+  if (newChatButton) {
+    newChatButton.addEventListener('click', () => {
+      threadId = '';
+      messages.replaceChildren();
+      addMessage(welcomeMessage, 'assistant');
+      input.focus();
+    });
+  }
+}
+
+/* ======================= INIT EXECUTION ======================= */
+wireStaticControls();
+// updateModeBadge();
+loadData(false);
+</script>

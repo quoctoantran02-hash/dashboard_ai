@@ -1,0 +1,347 @@
+ <!-- File HTML chính (Gom tất cả các partials) -->
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>PN/AR Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+
+<!-- include:Styles -->
+</head>
+<body>
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand"><div class="icon">🔔</div>PN/AR<br>Dashboard</div>
+    <nav class="nav">
+      <a class="active"><span>🔔</span>&nbsp; Overview</a>
+      <!-- <a href="#"><span>📋</span>&nbsp; PN/AR List</a>
+      <a href="#"><span>📊</span>&nbsp; Hiệu quả chiến dịch</a>
+      <a href="#"><span>👥</span>&nbsp; Audience Analysis</a>
+      <a href="#"><span>📈</span>&nbsp; Engagement Trend</a>
+      <a href="#"><span>🎯</span>&nbsp; Tần suất &amp; Bão hoà</a>
+      <a href="#"><span>💡</span>&nbsp; Insight &amp; Recommendation</a> -->
+    </nav>
+
+    <div class="filters">
+      <div class="filters-head">Bộ lọc <span class="clear" id="clearFilters">Xoá lọc</span></div>
+
+      <div class="f-group">
+        <label>Date Range</label>
+        <input type="date" id="dateFrom">
+      </div>
+      <div class="f-group">
+        <input type="date" id="dateTo">
+      </div>
+
+      <!-- <div class="f-group">
+        <label>Noti Type</label>
+        <div class="chip-row" id="typeChips"></div>
+      </div> -->
+
+      <div class="f-group">
+        <label>Product</label>
+        <div class="chip-row" id="productChips"></div>
+      </div>
+
+      <div class="f-group">
+        <label>Noti Type</label>
+        <div class="chip-row" id="typeChips"></div>
+      </div>
+
+      <div class="f-group">
+        <label>Task Name</label>
+        <input type="text" id="taskSearch" placeholder="Tìm kiếm...">
+      </div>
+      <button class="ai-insight-launcher" id="aiInsightBtn">✨ AI Assistant</button>
+      <aside class="ai-insight-panel" id="aiInsightPanel" aria-hidden="true">
+        <div class="ai-insight-head">
+          <div class="chart-card-title"><div class="ic">✨</div><span class="chart-title-copy">AI Assistant</span></div>
+          <button class="ai-chat-new" id="aiChatNewBtn" type="button">Chat mới</button>
+          <button class="icon-btn" id="aiInsightCollapseBtn" title="Thu gọn AI insight" aria-label="Thu gọn AI insight">×</button>
+        </div>
+        <div class="ai-insight-messages" id="aiChatMessages" aria-live="polite">
+          <div class="ai-chat-message-row assistant">
+            <img class="ai-chat-avatar" src="/dior.png" alt="Dior">
+            <div class="ai-chat-message assistant">Xin chào! Mình là Dior, trợ lý của Đào, mình có thể giúp bạn:
+- Phân tích thực trạng spam PN/AR trong timerange bạn đang filter
+- Giúp bạn tra cứu các user_id bị spam vào 1 ngày cụ thể, của 1 PN cụ thể
+- Gửi báo cáo tổng hợp về những đặc điểm của của các PN mang lại hiệu quả cao
+Hoặc bất kì câu hỏi nào về dữ liệu PN, feel free to ask nhé! ^^</div>
+          </div>
+        </div>
+        <form class="ai-chat-form" id="aiChatForm">
+          <textarea id="aiChatInput" rows="2" maxlength="4000" placeholder="Nhập tin nhắn..." aria-label="Tin nhắn cho AI" required></textarea>
+          <button type="submit" id="aiChatSendBtn">Enter để Gửi</button>
+        </form>
+      </aside>
+    </div>
+
+    <!-- <div class="mode-card">
+      <div class="mode-head">
+        <span class="title">Nguồn dữ liệu</span>
+        <span class="mode-badge live" id="modeBadge">LIVE</span>
+      </div>
+      <div class="switch-row">
+        <span class="lbl" id="switchLabel">Đang dùng dữ liệu thật</span>
+        <label class="switch">
+          <input type="checkbox" id="demoModeToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="mode-hint">Bật: xem thử dashboard bằng dữ liệu giả lập (offline, không đọc Sheet). Tắt: dùng dữ liệu thật từ <b>raw_data</b>.</div>
+    </div> -->
+
+    <button class="refresh-btn" id="refreshBtn"><span class="ic">⟳</span> Làm mới dữ liệu</button>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="hero">
+      <div class="hero-left">
+        <h1><span class="bell">🔔</span>PN/AR Dashboard</h1>
+        <p class="tag">Track. Analyze. Optimize.</p>
+        <p class="sub">Better notifications. Better engagement. Better customer experience.</p>
+        <div class="hero-notes">
+          <div class="hero-notes-divider"></div>
+          <p class="hero-notes-label"><strong>Note:</strong></p>
+          <ul>
+            <li><strong>Data period:</strong> From 01/07 to date.</li>
+            <li><strong>Impression &amp; Click:</strong> Counted by event.</li>
+            <li><strong>PN data source:</strong> <a href="https://docs.google.com/spreadsheets/d/1nT82j-OckQdaxXlizRYjV3x0gCfllH_2J9_ilUat8p4/edit?gid=1955083918#gid=1955083918" target="_blank" rel="noopener noreferrer">VNCredit Campaign Ops Master Tracker</a>.</li>
+            <li><strong>For questions:</strong> Please contact <strong>quoctoan.tran02</strong>.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="daterange" id="heroRange">📅 —</div>
+    </div>
+
+    <div id="loadingState" class="loading"><div class="spin"></div> Đang tải dữ liệu từ Google Sheet…</div>
+
+
+<!-- I. Overview -->
+
+    <div id="dashboardBody" style="display:none;">
+      <div class="section-title"><span class="n">1.</span> OVERVIEW</div>
+
+
+        <!-- <div class="grid-top">
+          <div class="score-card pn">
+            <div class="score-top"><div class="score-icon">🔔</div><div class="label"><b>PN</b><span>(Push Notification)</span></div></div>
+            <div class="score-value" id="pnImpression">–</div>
+            <div style="font-size:11.5px;color:var(--sub);margin-top:-4px;">Impression (User)</div>
+            <div class="score-metrics"><div><span>Sent</span><b id="pnSent">–</b></div><div><span>Click</span><b id="pnClick">–</b></div><div><span>CTR</span><b id="pnCTR">–</b></div></div>
+            <div class="score-delta" id="pnDeltaRow">– vs. 7 ngày trước</div>
+          </div>
+
+          <div class="score-card ar">
+            <div class="score-top"><div class="score-icon">⚡</div><div class="label"><b>AR</b><span>(Action Required)</span></div></div>
+            <div class="score-value" id="arImpression">–</div>
+            <div style="font-size:11.5px;color:var(--sub);margin-top:-4px;">Impression (User)</div>
+            <div class="score-metrics"><div><span>Sent</span><b id="arSent">–</b></div><div><span>Click</span><b id="arClick">–</b></div><div><span>CTR</span><b id="arCTR">–</b></div></div>
+            <div class="score-delta" id="arDeltaRow">– vs. 7 ngày trước</div>
+          </div>
+        </div> -->
+
+
+        <div class="overview-row-top">
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <div class="chart-card-title"><div class="ic">📦</div><span class="chart-title-copy"><span class="chart-metric-title" id="productDonutTitleMetric">Số lượng task</span> theo Product</span></div>
+              <div class="cols-dropdown-wrapper">
+                <button class="btn-ghost" id="productDonutMetricBtn">📊 Chọn Metric</button>
+                <div class="cols-menu" id="productDonutMetricMenu">
+                  <div class="cols-menu-label">Metric hiển thị</div>
+                  <label><input type="radio" name="productDonutMetric" class="donut-metric-radio" value="tasks" checked> Số lượng task</label>
+                  <label><input type="radio" name="productDonutMetric" class="donut-metric-radio" value="impr"> Impression</label>
+                  <label><input type="radio" name="productDonutMetric" class="donut-metric-radio" value="click"> Click</label>
+                </div>
+              </div>
+            </div>
+            <div class="chart-container-donut">
+              <div class="donut-wrap"><canvas id="productDonutChart"></canvas></div>
+              <div class="donut-legend" id="legendProductDonut"></div>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <div class="chart-card-title"><div class="ic">👥</div><span class="chart-title-copy"><span class="chart-metric-title" id="picDonutTitleMetric">Số lượng task</span> theo Team Request</span></div>
+              <div class="cols-dropdown-wrapper">
+                <button class="btn-ghost" id="picDonutMetricBtn">📊 Chọn Metric</button>
+                <div class="cols-menu" id="picDonutMetricMenu">
+                  <div class="cols-menu-label">Metric hiển thị</div>
+                  <label><input type="radio" name="picDonutMetric" class="donut-metric-radio" value="tasks" checked> Số lượng task</label>
+                  <label><input type="radio" name="picDonutMetric" class="donut-metric-radio" value="impr"> Impression</label>
+                  <label><input type="radio" name="picDonutMetric" class="donut-metric-radio" value="click"> Click</label>
+                </div>
+              </div>
+            </div>
+            <div class="chart-container-donut">
+              <div class="donut-wrap"><canvas id="picDonutChart"></canvas></div>
+              <div class="donut-legend" id="legendPicDonut"></div>
+            </div>
+          </div>
+
+          <div class="chart-card topic-card">
+            <div class="chart-card-header">
+              <div class="chart-card-title"><div class="ic">🏷️</div><span class="chart-title-copy">Top 5 <span class="chart-metric-title" id="topicTitleMetric">Số lượng task</span> theo Topic</span></div>
+              <div class="topic-card-actions">
+                <div class="cols-dropdown-wrapper">
+                  <button class="btn-ghost" id="topicMetricBtn">📊 Chọn Metric</button>
+                  <div class="cols-menu" id="topicMetricMenu">
+                    <div class="cols-menu-label">Metric hiển thị</div>
+                    <label><input type="radio" name="topicMetric" class="topic-metric-radio" value="tasks" checked> Số lượng task</label>
+                    <label><input type="radio" name="topicMetric" class="topic-metric-radio" value="impr"> Impression</label>
+                    <label><input type="radio" name="topicMetric" class="topic-metric-radio" value="click"> Click</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="topic-chart-wrap"><canvas id="topicBarChart"></canvas></div>
+          </div>
+
+        </div>
+
+        <!-- Filter granularity for combo chart -->
+        <div class="overview-row-bottom">
+          <div class="chart-card">
+            
+            <!-- HEADER CỦA CHART (Đã xóa các thẻ div bọc thừa) -->
+            <div class="detail-head">
+              <h3>Total Event Sent/Impression/Click - Click rate theo ngày</h3>
+              
+              <div class="detail-actions">
+                <!-- Filter Granularity (Daily / Weekly) -->
+                <div class="cols-dropdown-wrapper">
+                  <button class="btn-ghost" id="granBtn">📅 <span id="granText">Daily</span></button>
+                  <div class="cols-menu gran-menu" id="granMenu">
+                    <div class="gran-option active" data-value="daily">Daily</div>
+                    <div class="gran-option" data-value="weekly">Weekly</div>
+                  </div>
+                </div>
+
+                <!-- Filter Chọn chỉ số Metric -->
+                <div class="cols-dropdown-wrapper">
+                  <button class="btn-ghost" id="chartColsBtn">📊 Chọn chỉ số</button>
+                  <div class="cols-menu" id="chartColsMenu">
+                    <label><input type="checkbox" class="metric-cb" value="sent" checked> Sent</label>
+                    <label><input type="checkbox" class="metric-cb" value="impr" checked> Impression</label>
+                    <label><input type="checkbox" class="metric-cb" value="click" checked> Click</label>
+                    <label><input type="checkbox" class="metric-cb" value="ctr" checked> % Click / Impression</label>
+                    <label><input type="checkbox" class="metric-cb" value="cps"> % Click / Sent</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- NỘI DUNG CHART -->
+            <div class="chart-container-combo">
+              <canvas id="comboOverviewChart"></canvas>
+            </div>
+            <p class="chart-note">Nhấp vào 1 ngày cụ thể để xem dữ liệu chi tiết của ngày đó.</p>
+
+          </div>
+        </div>
+        <!-- <div class="chart-card">
+          <div class="chart-card-head">
+            <h3>Số lượng PN &amp; AR chạy hàng ngày</h3>
+            <select class="pill-select" id="granularitySelect"><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
+          </div>
+          <div class="legend-row" id="legendDaily"></div>
+          <div class="chart-wrap"><canvas id="dailyChart"></canvas></div>
+        </div> -->
+      </div>
+
+
+<!-- II. DETAIL TRAFFIC IMPRESSION & CLICK THEO TỪNG PN/AR -->
+
+      <div class="section-title" style="margin-top:34px;"><span class="n">2.</span> DETAIL TRAFFIC IMPRESSION &amp; CLICK RATE</div>
+
+      <div class="detail-card">
+        <div class="detail-head">
+          <h3><div class="ic">📋</div>Chi tiết Impression theo ngày</h3>
+          
+          <!-- HEADER TABLE -->
+          <div class="detail-actions">
+            <!-- Filter Columns hiển thị -->
+            <div class="cols-dropdown-wrapper">
+              <button class="btn-ghost" id="colsBtn">🗂 Columns/Metric view</button>
+              <div class="cols-menu" id="colsMenu">
+                <label><input type="checkbox" id="toggleTitle" checked> Title</label>
+                <label><input type="checkbox" id="toggleContent" checked> Content</label>
+                <label><input type="checkbox" id="toggleDayCols" checked> Hiện chi tiết theo ngày</label>
+                <label><input type="checkbox" id="toggleCTR" checked> Hiện cột CTR</label>
+                <label><input type="checkbox" id="toggleSent" checked> Hiện cột Sent</label>
+
+                <div class="cols-menu-divider"></div>
+                <div class="cols-menu-label">Metric theo ngày</div>
+                <label><input type="radio" name="dayMetric" class="day-metric-radio" value="sent" checked> Sent (User) theo ngày</label>
+                <label><input type="radio" name="dayMetric" class="day-metric-radio" value="impr"> Impression (Event) theo ngày</label>
+                <label><input type="radio" name="dayMetric" class="day-metric-radio" value="click"> Click (Event) theo ngày</label>
+                <label><input type="radio" name="dayMetric" class="day-metric-radio" value="ctr"> % CTR theo ngày</label>
+                <label><input type="radio" name="dayMetric" class="day-metric-radio" value="spam"> %Spam theo ngày</label>
+              </div>
+            </div>
+            <!-- Filter Noti Type -->
+            <!-- <select class="pill-select" id="tableTypeSelect">
+              <option value="ALL">Tất cả Type (PN & AR)</option>
+              <option value="PN">PN</option>
+              <option value="AR">AR</option>
+            </select>
+
+            <!-- Filter Chọn Metric
+            <select class="pill-select" id="tableMetricSelect">
+              <option value="impr">Impression</option>
+              <option value="sent">Sent</option>
+              <option value="click">Click</option>
+              <option value="ctr">Tỉ lệ Click/Impression (CTR)</option>
+            </select> -->
+
+            <!-- button export csv -->
+            <button class="btn-ghost" id="exportBtn">⬇ Export CSV</button>
+
+            <!-- Searchable multi-select Topic -->
+            <div class="topic-filter-wrapper search-box" id="topicFilterWrapper">
+              <span aria-hidden="true">🔍</span>
+              <input id="tableTopicSearch" type="text" placeholder="Tìm Topic..." autocomplete="off" aria-label="Tìm Topic" aria-expanded="false" aria-controls="topicFilterMenu">
+              <span class="topic-selection-count" id="topicSelectionCount">Tất cả</span>
+              <div class="topic-filter-menu" id="topicFilterMenu" role="listbox" aria-label="Chọn nhiều Topic" aria-multiselectable="true">
+                <button type="button" class="topic-clear-selection" id="clearTopicSelection">Bỏ chọn tất cả</button>
+                <div class="topic-filter-options" id="topicFilterOptions"></div>
+              </div>
+            </div>
+
+            <!-- Search task name -->
+            <div class="search-box">🔍 <input id="tableSearch" placeholder="Tìm kiếm task..."></div>
+          </div>
+
+        </div>
+        <div class="table-scroll">
+          <table class="detail" id="detailTable">
+            <thead>
+              <tr class="grp" id="grpRow"></tr>
+              <tr id="headRow"></tr>
+            </thead>
+            <tbody id="bodyRows"></tbody>
+          </table>
+        </div>
+        <div class="table-hint">
+          <span id="rowCountHint">0 task</span>
+          <span>Nhấp vào 1 dòng để xem biểu đồ xu hướng theo ngày · Nhấp tiêu đề cột để sắp xếp</span>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- include:Script_Filters -->
+<!-- include:Script_Charts -->
+<!-- include:Script_Table -->
+<!-- include:Script_Main -->
+
+</body>
+</html>

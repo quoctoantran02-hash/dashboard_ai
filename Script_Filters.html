@@ -1,0 +1,189 @@
+<!-- # JS: Logic xử lý bộ lọc, gom nhóm dữ liệu -->
+<script>
+/* ======================= FILTERS UI & LOGIC ======================= */
+function getDefaultDateRange(){
+  const today = new Date();
+  const firstDayTwoMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+  const formatLocalDate = date => {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+  return { from: formatLocalDate(firstDayTwoMonthsAgo), to: formatLocalDate(today) };
+}
+
+function initFiltersUI(){
+  if(RAW.length === 0) return;
+  const dates = RAW.map(r=>r.date).sort();
+  const minDate = dates[0], maxDate = dates[dates.length-1];
+  const fromEl = document.getElementById('dateFrom'), toEl = document.getElementById('dateTo');
+  const defaultRange = getDefaultDateRange();
+  if(!fromEl.value){ fromEl.min = minDate; fromEl.max = defaultRange.to; fromEl.value = defaultRange.from; }
+  if(!toEl.value){ toEl.min = minDate; toEl.max = defaultRange.to; toEl.value = defaultRange.to; }
+
+  const products = [...new Set(RAW.map(r=>r.product))].sort();
+
+  // Product chips — chỉ khởi tạo 1 lần
+  const productChips = document.getElementById('productChips');
+  const productsKey = products.join('|');
+  if(productChips.dataset.key !== productsKey){
+    productChips.innerHTML = products.map(p=>`<div class="chip on" data-product="${p}">${p}</div>`).join('');
+    productChips.dataset.key = productsKey;
+    productChips.querySelectorAll('.chip').forEach(c=> c.addEventListener('click', ()=>{ c.classList.toggle('on'); applyFilters(); }));
+  }
+
+
+  // Type chips (PN / AR) — chỉ khởi tạo 1 lần
+  const typeChips = document.getElementById('typeChips');
+  if(typeChips && !typeChips.dataset.inited){
+    const types = ['PN','AR'];
+    // Mặc định chỉ chọn PN
+    typeChips.innerHTML = types.map(t=>`<div class="chip ${t==='PN'?'on':''}" data-type="${t}">${t}</div>`).join('');
+    typeChips.dataset.inited = '1';
+    typeChips.querySelectorAll('.chip').forEach(c=> c.addEventListener('click', ()=>{
+      // Single-select: bỏ 'on' ở tất cả chip khác, chỉ bật chip vừa click
+      typeChips.querySelectorAll('.chip').forEach(x=> x.classList.remove('on'));
+      c.classList.add('on');
+      applyFilters();
+    }));
+  }
+  // document.querySelectorAll('.metric-cb').forEach(cb => {cb.addEventListener('change', renderComboChart);});
+}
+
+function getActiveTypes(){ return [...document.querySelectorAll('#typeChips .chip.on')].map(c=>c.dataset.type); }
+function getActiveProducts(){ return [...document.querySelectorAll('#productChips .chip.on')].map(c=>c.dataset.product); }
+
+/* ======================= APPLY FILTERS ======================= */
+function applyFilters(){
+  const from = document.getElementById('dateFrom').value;
+  const to = document.getElementById('dateTo').value;
+  const types = getActiveTypes();
+  const productsOn = getActiveProducts();
+  const search = document.getElementById('taskSearch').value.trim().toLowerCase();
+
+  FILTERED = RAW.filter(r=>{
+    if(from && r.date < from) return false;
+    if(to && r.date > to) return false;
+    if(types.length && !types.includes(r.type)) return false;
+    if(productsOn.length && !productsOn.includes(r.product)) return false;
+    if(search && !r.taskName.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  document.getElementById('heroRange').textContent = '📅 ' + (from||'') + ' → ' + (to||'');
+  renderScoreCards();
+  renderOverviewSection();
+  renderTable();
+}
+
+/* ======================= SCORE CARDS & TAKEAWAYS ======================= */
+function renderScoreCards(){
+  // 1. Tái sử dụng hàm buildTaskAggregates() để đảm bảo tính toán đồng bộ
+  const tasks = buildTaskAggregates();
+
+  // 2. Phân loại danh sách task theo loại (PN / AR)
+  const pnTasks = tasks.filter(t => t.type === 'PN');
+  const arTasks = tasks.filter(t => t.type === 'AR');
+
+  // 3. Hàm tính tổng các metric đã gom nhóm từ tasks
+  const sum = (arr, key) => arr.reduce((a, t) => a + (t[key] || 0), 0);
+
+  const pnImpr = sum(pnTasks, 'totalImpr');
+  const pnClick = sum(pnTasks, 'totalClick');
+  const pnSent = sum(pnTasks, 'totalSent');
+
+  const arImpr = sum(arTasks, 'totalImpr');
+  const arClick = sum(arTasks, 'totalClick');
+  const arSent = sum(arTasks, 'totalSent');
+
+  // 4. Tìm Task có CTR cao nhất (chỉ lọc các task có totalImpr > 0)
+  const validTasks = tasks.filter(t => t.totalImpr > 0);
+  const bestCTRTask = validTasks.length 
+    ? validTasks.reduce((b, t) => t.ctr > b.ctr ? t : b) 
+    : null;
+
+  // 5. Tính toán các chỉ số bổ trợ
+  const ratio = arImpr ? (pnImpr / arImpr).toFixed(1) : '–';
+  const pnDelivery = pnSent ? (pnImpr / pnSent * 100) : 0;
+  const arDelivery = arSent ? (arImpr / arSent * 100) : 0;
+  const weekendNote = 'Tần suất gửi PN/AR có xu hướng tăng vào cuối tuần.';
+
+  // 6. Hiển thị kết quả ra thẻ HTML
+  const keyList = document.getElementById('keyList');
+  if (!keyList) return;
+
+  keyList.innerHTML = `
+    // <li>
+    //   <div class="ic2">🧮</div>
+    //   <span class="takeaway-text">
+    //     Có 18 task có lượng sent thấp hơn so với dự định
+    //   </span>
+    // </li>
+
+    // <li>
+    //   <div class="ic2">🧮</div>
+    //   <span class="takeaway-text">
+    //     Có 22 task có tần suất sent sai lệch so với dự định
+    //   </span>
+    // </li>
+
+    <li>
+      <div class="ic2">📊</div>
+      <span class="takeaway-text">
+        PN có lượng impression gấp <b>${ratio}</b> lần AR${pnImpr && arImpr && typeof pnCTRvsAR === 'function' ? pnCTRvsAR(pnImpr, pnClick, arImpr, arClick) : ''}.
+      </span>
+    </li>
+
+    // ${bestCTRTask ? `
+    // <li>
+    //   <div class="ic2">⭐</div>
+    //   <span class="takeaway-text">
+    //     Topic <b>${bestCTRTask.pic}</b> (${bestCTRTask.type}) đang có tỷ lệ click cao nhất trong khoảng lọc hiện tại (<b>${(bestCTRTask.ctr * 100).toFixed(1)}%</b>).
+    //   </span>
+    // </li>
+    // ` : ''}
+
+    <li>
+      <div class="ic2">📬</div>
+      <span class="takeaway-text">
+        Tỷ lệ hiển thị trên số lượng gửi (Impression/Sent) đạt <b>${pnDelivery.toFixed(1)}%</b> đối với PN và <b>${arDelivery.toFixed(1)}%</b> đối với AR.
+      </span>
+    </li>
+
+    <li>
+      <div class="ic2">⭐</div>
+      <span class="takeaway-text">
+        Có <b>10</b> PN có dấu hiệu spam (tần suất chạy cao hơn so với dự kiến)
+      </span>
+    </li>
+
+    <li>
+      <div class="ic2">🧮</div>
+      <span class="takeaway-text">
+        ...
+      </span
+    </li>
+  `;
+}
+
+function pnCTRvsAR(pnImpr,pnClick,arImpr,arClick){
+  const pnCTR = pnClick/pnImpr*100, arCTR = arClick/arImpr*100;
+  return pnCTR < arCTR ? ' nhưng CTR thấp hơn' : ' và CTR cao hơn';
+}
+
+function setDelta(elId, arr){
+  const el = document.getElementById(elId);
+  const dates = [...new Set(arr.map(r=>r.date))].sort();
+  if(dates.length < 2){ el.textContent = 'Không đủ dữ liệu so sánh'; el.className='score-delta'; return; }
+  const mid = dates[Math.max(0, dates.length-8)];
+  const lastWeek = arr.filter(r=>r.date >= mid);
+  const prevWeek = arr.filter(r=>r.date < mid);
+  const lastSum = lastWeek.reduce((a,r)=>a+r.impression,0);
+  const prevSum = prevWeek.reduce((a,r)=>a+r.impression,0);
+  if(prevSum === 0){ el.textContent='–'; return; }
+  const pct = ((lastSum-prevSum)/prevSum*100);
+  el.className = 'score-delta ' + (pct>=0?'up':'down');
+  el.textContent = (pct>=0?'▲ +':'▼ ') + pct.toFixed(1) + '% vs. 7 ngày trước';
+}
+</script>
